@@ -1,366 +1,1229 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: VPC Infrastructure for ECS Fargate with High Availability and Auto Scaling
+Description: 'CloudFormation template for deploying JDKFrames application with frontend and backend services in a highly available environment'
 
 Parameters:
+  EnvironmentName:
+    Description: An environment name that is prefixed to resource names
+    Type: String
+    Default: JDKFrames
+
   VpcCIDR:
-    Description: CIDR block for the VPC
+    Description: Please enter the IP range (CIDR notation) for this VPC
     Type: String
-    Default: "10.0.0.0/16"
+    Default: 10.192.0.0/16
 
-  PublicSubnetCIDR1:
-    Description: CIDR block for first public subnet
+  PublicSubnet1CIDR:
+    Description: Please enter the IP range (CIDR notation) for the public subnet in the first Availability Zone
     Type: String
-    Default: "10.0.1.0/24"
+    Default: 10.192.10.0/24
 
-  PublicSubnetCIDR2:
-    Description: CIDR block for second public subnet
+  PublicSubnet2CIDR:
+    Description: Please enter the IP range (CIDR notation) for the public subnet in the second Availability Zone
     Type: String
-    Default: "10.0.2.0/24"
+    Default: 10.192.11.0/24
 
-  PrivateSubnetCIDR1:
-    Description: CIDR block for first private subnet
+  PrivateSubnet1CIDR:
+    Description: Please enter the IP range (CIDR notation) for the private subnet in the first Availability Zone
     Type: String
-    Default: "10.0.3.0/24"
+    Default: 10.192.20.0/24
 
-  PrivateSubnetCIDR2:
-    Description: CIDR block for second private subnet
+  PrivateSubnet2CIDR:
+    Description: Please enter the IP range (CIDR notation) for the private subnet in the second Availability Zone
     Type: String
-    Default: "10.0.4.0/24"
+    Default: 10.192.21.0/24
 
-  InstanceType:
-    Description: EC2 instance type
-    Type: String
-    Default: "t3.micro"
+  FrontendTaskCPU:
+    Description: CPU units for the frontend container
+    Type: Number
+    Default: 256
 
-  AwsAccessKeyID:
-    Type: String
-    NoEcho: true
+  FrontendTaskMemory:
+    Description: Memory for the frontend container (in MiB)
+    Type: Number
+    Default: 512
 
-  AwsSecretAccessKey:
-    Type: String
-    NoEcho: true
+  BackendTaskCPU:
+    Description: CPU units for the backend container
+    Type: Number
+    Default: 512
 
-  AwsS3BucketName:
-    Type: String
-    NoEcho: true
+  BackendTaskMemory:
+    Description: Memory for the backend container (in MiB)
+    Type: Number
+    Default: 1024
 
-  AwsRegion:
+  FrontendDesiredCount:
+    Description: Number of instances of the frontend task to place in the service
+    Type: Number
+    Default: 2
+
+  BackendDesiredCount:
+    Description: Number of instances of the backend task to place in the service
+    Type: Number
+    Default: 2
+
+  FrontendImage:
+    Description: Frontend Docker image
     Type: String
+    Default: public.ecr.aws/u1k7f1w4/jdkframes-ui:first
+
+  BackendImage: 
+    Description: Backend Docker image
+    Type: String
+    Default: public.ecr.aws/u1k7f1w4/jdkframes-api:first
+
+  GitHubOwner:
+    Type: String
+    Description: GitHub repository owner
+    Default: YourGitHubUsername
+
+  GitHubRepo:
+    Type: String
+    Description: GitHub repository name
+    Default: jdkframes-app
+
+  GitHubBranch:
+    Type: String
+    Description: GitHub repository branch
+    Default: main
+
+  GitHubToken:
+    Type: String
+    Description: GitHub OAuth token
     NoEcho: true
 
 Resources:
-  # VPC
+  # VPC and Networking Components
   VPC:
     Type: AWS::EC2::VPC
     Properties:
       CidrBlock: !Ref VpcCIDR
-      EnableDnsSupport: 'true'
-      EnableDnsHostnames: 'true'
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
       Tags:
         - Key: Name
-          Value: ECSFargateVPC
+          Value: !Sub ${EnvironmentName}-VPC
 
-  # Internet Gateway
   InternetGateway:
     Type: AWS::EC2::InternetGateway
     Properties:
       Tags:
         - Key: Name
-          Value: ECSFargateIGW
+          Value: !Sub ${EnvironmentName}-IGW
 
-  AttachGateway:
+  InternetGatewayAttachment:
     Type: AWS::EC2::VPCGatewayAttachment
     Properties:
-      VpcId: !Ref VPC
       InternetGatewayId: !Ref InternetGateway
+      VpcId: !Ref VPC
 
-  # Public Subnets in 2 AZs
   PublicSubnet1:
     Type: AWS::EC2::Subnet
     Properties:
       VpcId: !Ref VPC
-      CidrBlock: !Ref PublicSubnetCIDR1
       AvailabilityZone: !Select [ 0, !GetAZs '' ]
-      MapPublicIpOnLaunch: 'true'
+      CidrBlock: !Ref PublicSubnet1CIDR
+      MapPublicIpOnLaunch: true
       Tags:
         - Key: Name
-          Value: ECSFargatePublicSubnet1
+          Value: !Sub ${EnvironmentName}-PublicSubnet1
 
   PublicSubnet2:
     Type: AWS::EC2::Subnet
     Properties:
       VpcId: !Ref VPC
-      CidrBlock: !Ref PublicSubnetCIDR2
       AvailabilityZone: !Select [ 1, !GetAZs '' ]
-      MapPublicIpOnLaunch: 'true'
+      CidrBlock: !Ref PublicSubnet2CIDR
+      MapPublicIpOnLaunch: true
       Tags:
         - Key: Name
-          Value: ECSFargatePublicSubnet2
+          Value: !Sub ${EnvironmentName}-PublicSubnet2
 
-  # Private Subnets in 2 AZs
   PrivateSubnet1:
     Type: AWS::EC2::Subnet
     Properties:
       VpcId: !Ref VPC
-      CidrBlock: !Ref PrivateSubnetCIDR1
       AvailabilityZone: !Select [ 0, !GetAZs '' ]
+      CidrBlock: !Ref PrivateSubnet1CIDR
+      MapPublicIpOnLaunch: false
       Tags:
         - Key: Name
-          Value: ECSFargatePrivateSubnet1
+          Value: !Sub ${EnvironmentName}-PrivateSubnet1
 
   PrivateSubnet2:
     Type: AWS::EC2::Subnet
     Properties:
       VpcId: !Ref VPC
-      CidrBlock: !Ref PrivateSubnetCIDR2
       AvailabilityZone: !Select [ 1, !GetAZs '' ]
+      CidrBlock: !Ref PrivateSubnet2CIDR
+      MapPublicIpOnLaunch: false
       Tags:
         - Key: Name
-          Value: ECSFargatePrivateSubnet2
+          Value: !Sub ${EnvironmentName}-PrivateSubnet2
 
-  # NAT Gateway
-  EIP:
+  NatGateway1EIP:
     Type: AWS::EC2::EIP
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      Domain: vpc
 
-  NatGateway:
+  NatGateway2EIP:
+    Type: AWS::EC2::EIP
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      Domain: vpc
+
+  NatGateway1:
     Type: AWS::EC2::NatGateway
     Properties:
-      AllocationId: !GetAtt EIP.AllocationId
+      AllocationId: !GetAtt NatGateway1EIP.AllocationId
       SubnetId: !Ref PublicSubnet1
       Tags:
         - Key: Name
-          Value: ECSFargateNATGateway
+          Value: !Sub ${EnvironmentName}-NatGateway1
 
-  # Route Table for Public Subnets
+  NatGateway2:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt NatGateway2EIP.AllocationId
+      SubnetId: !Ref PublicSubnet2
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-NatGateway2
+
   PublicRouteTable:
     Type: AWS::EC2::RouteTable
     Properties:
       VpcId: !Ref VPC
       Tags:
         - Key: Name
-          Value: ECSFargatePublicRouteTable
+          Value: !Sub ${EnvironmentName}-PublicRoutes
 
-  PublicRoute:
+  DefaultPublicRoute:
     Type: AWS::EC2::Route
+    DependsOn: InternetGatewayAttachment
     Properties:
       RouteTableId: !Ref PublicRouteTable
-      DestinationCidrBlock: "0.0.0.0/0"
+      DestinationCidrBlock: 0.0.0.0/0
       GatewayId: !Ref InternetGateway
 
-  # Route Table for Private Subnets
-  PrivateRouteTable:
+  PublicSubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref PublicSubnet1
+
+  PublicSubnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref PublicSubnet2
+
+  PrivateRouteTable1:
     Type: AWS::EC2::RouteTable
     Properties:
       VpcId: !Ref VPC
       Tags:
         - Key: Name
-          Value: ECSFargatePrivateRouteTable
+          Value: !Sub ${EnvironmentName}-PrivateRoutes1
 
-  PrivateRoute:
+  DefaultPrivateRoute1:
     Type: AWS::EC2::Route
     Properties:
-      RouteTableId: !Ref PrivateRouteTable
-      DestinationCidrBlock: "0.0.0.0/0"
-      NatGatewayId: !Ref NatGateway
+      RouteTableId: !Ref PrivateRouteTable1
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGateway1
 
-  # Associate Subnets with Route Tables
-  PublicSubnetRouteTableAssociation1:
+  PrivateSubnet1RouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
-      SubnetId: !Ref PublicSubnet1
-      RouteTableId: !Ref PublicRouteTable
-
-  PublicSubnetRouteTableAssociation2:
-    Type: AWS::EC2::SubnetRouteTableAssociation
-    Properties:
-      SubnetId: !Ref PublicSubnet2
-      RouteTableId: !Ref PublicRouteTable
-
-  PrivateSubnetRouteTableAssociation1:
-    Type: AWS::EC2::SubnetRouteTableAssociation
-    Properties:
+      RouteTableId: !Ref PrivateRouteTable1
       SubnetId: !Ref PrivateSubnet1
-      RouteTableId: !Ref PrivateRouteTable
 
-  PrivateSubnetRouteTableAssociation2:
+  PrivateRouteTable2:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub ${EnvironmentName}-PrivateRoutes2
+
+  DefaultPrivateRoute2:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable2
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGateway2
+
+  PrivateSubnet2RouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
+      RouteTableId: !Ref PrivateRouteTable2
       SubnetId: !Ref PrivateSubnet2
-      RouteTableId: !Ref PrivateRouteTable
 
-  # Security Group for ECS Fargate
-  ECSFargateSG:
+  # S3 Bucket for Images
+  ImagesBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "${EnvironmentName}-images-${AWS::AccountId}"
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      CorsConfiguration:
+        CorsRules:
+          - AllowedHeaders: ['*']
+            AllowedMethods: [GET, PUT, POST, DELETE, HEAD]
+            AllowedOrigins: ['*']
+            MaxAge: 3000
+
+  # IAM Role for ECS Tasks
+  ECSTaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+
+  ECSServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceRole
+
+  # IAM Role for S3 Access
+  S3AccessRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: S3ImageAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:ListBucket
+                  - s3:DeleteObject
+                Resource: 
+                  - !Sub 'arn:aws:s3:::${ImagesBucket}'
+                  - !Sub 'arn:aws:s3:::${ImagesBucket}/*'
+
+  # Security Groups
+  ALBSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: Allow inbound HTTP and communication between containers
+      GroupDescription: Security group for the application load balancer
       VpcId: !Ref VPC
       SecurityGroupIngress:
         - IpProtocol: tcp
-          FromPort: '80'
-          ToPort: '80'
-          CidrIp: "0.0.0.0/0"
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
         - IpProtocol: tcp
-          FromPort: '3000'
-          ToPort: '3000'
-          CidrIp: "0.0.0.0/0"
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
 
-  # Application Load Balancer (ALB) with Multi-AZ support
-  ALB:
-    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+  FrontendSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
     Properties:
-      Name: ECSFargateALB
-      Subnets:
-        - Ref: PublicSubnet1
-        - Ref: PublicSubnet2
-      SecurityGroups:
-        - Ref: ECSFargateSG
-      LoadBalancerAttributes:
-        - Key: idle_timeout.timeout_seconds
-          Value: '60'
-      Scheme: internet-facing
-      Type: application
+      GroupDescription: Security group for the frontend service
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          SourceSecurityGroupId: !Ref ALBSecurityGroup
 
-  # ALB Listener for HTTP
-  ALBListener:
-    Type: AWS::ElasticLoadBalancingV2::Listener
+  BackendSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
     Properties:
-      DefaultActions:
-        - Type: fixed-response
-          FixedResponseConfig:
-            StatusCode: 200
-            MessageBody: "OK"
-            ContentType: text/plain
-      LoadBalancerArn: !Ref ALB
-      Port: 80
-      Protocol: HTTP
+      GroupDescription: Security group for the backend service
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 3000
+          ToPort: 3000
+          SourceSecurityGroupId: !Ref FrontendSecurityGroup
 
   # ECS Cluster
   ECSCluster:
     Type: AWS::ECS::Cluster
     Properties:
-      ClusterName: ECSFargateCluster
+      ClusterName: !Sub ${EnvironmentName}-Cluster
+      CapacityProviders:
+        - FARGATE
+        - FARGATE_SPOT
+      DefaultCapacityProviderStrategy:
+        - CapacityProvider: FARGATE
+          Weight: 1
 
-  # ECS Fargate Service with Auto Scaling
-  ECSFargateService:
-    Type: AWS::ECS::Service
+  # Load Balancers
+  PublicALB:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
     Properties:
+      Name: !Sub ${EnvironmentName}-ALB
+      Scheme: internet-facing
+      LoadBalancerAttributes:
+        - Key: idle_timeout.timeout_seconds
+          Value: '60'
+      Subnets:
+        - !Ref PublicSubnet1
+        - !Ref PublicSubnet2
+      SecurityGroups:
+        - !Ref ALBSecurityGroup
+
+  BackendALB:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: !Sub ${EnvironmentName}-BackendALB
+      Scheme: internal
+      LoadBalancerAttributes:
+        - Key: idle_timeout.timeout_seconds
+          Value: '60'
+      Subnets:
+        - !Ref PrivateSubnet1
+        - !Ref PrivateSubnet2
+      SecurityGroups:
+        - !Ref BackendSecurityGroup
+
+  # Target Groups and Listeners
+  FrontendTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Sub ${EnvironmentName}-FrontendTG
+      Port: 80
+      Protocol: HTTP
+      TargetType: ip
+      VpcId: !Ref VPC
+      HealthCheckPath: /
+      HealthCheckIntervalSeconds: 30
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 3
+
+  FrontendBlueTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Sub ${EnvironmentName}-FrontendBlueTG
+      Port: 80
+      Protocol: HTTP
+      TargetType: ip
+      VpcId: !Ref VPC
+      HealthCheckPath: /
+      HealthCheckIntervalSeconds: 30
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 3
+
+  FrontendGreenTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Sub ${EnvironmentName}-FrontendGreenTG
+      Port: 80
+      Protocol: HTTP
+      TargetType: ip
+      VpcId: !Ref VPC
+      HealthCheckPath: /
+      HealthCheckIntervalSeconds: 30
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 3
+
+  BackendTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Sub ${EnvironmentName}-BackendTG
+      Port: 3000
+      Protocol: HTTP
+      TargetType: ip
+      VpcId: !Ref VPC
+      HealthCheckPath: /health
+      HealthCheckIntervalSeconds: 30
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 3
+
+  BackendBlueTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Sub ${EnvironmentName}-BackendBlueTG
+      Port: 3000
+      Protocol: HTTP
+      TargetType: ip
+      VpcId: !Ref VPC
+      HealthCheckPath: /health
+      HealthCheckIntervalSeconds: 30
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 3
+
+  BackendGreenTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Sub ${EnvironmentName}-BackendGreenTG
+      Port: 3000
+      Protocol: HTTP
+      TargetType: ip
+      VpcId: !Ref VPC
+      HealthCheckPath: /health
+      HealthCheckIntervalSeconds: 30
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 3
+
+  PublicALBListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref FrontendTargetGroup
+      LoadBalancerArn: !Ref PublicALB
+      Port: 80
+      Protocol: HTTP
+
+  BackendALBListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref BackendTargetGroup
+      LoadBalancerArn: !Ref BackendALB
+      Port: 3000
+      Protocol: HTTP
+
+  # Task Definitions
+  BackendTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub ${EnvironmentName}-backend
+      RequiresCompatibilities:
+        - FARGATE
+      NetworkMode: awsvpc
+      Cpu: !Ref BackendTaskCPU
+      Memory: !Ref BackendTaskMemory
+      ExecutionRoleArn: !GetAtt ECSTaskExecutionRole.Arn
+      TaskRoleArn: !GetAtt S3AccessRole.Arn
+      ContainerDefinitions:
+        - Name: backend
+          Image: !Ref BackendImage
+          Essential: true
+          PortMappings:
+            - ContainerPort: 3000
+              HostPort: 3000
+              Protocol: tcp
+          Environment:
+            - Name: S3_BUCKET_NAME
+              Value: !Ref ImagesBucket
+            - Name: AWS_REGION
+              Value: !Ref AWS::Region
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref BackendLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: backend
+
+  FrontendTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub ${EnvironmentName}-frontend
+      RequiresCompatibilities:
+        - FARGATE
+      NetworkMode: awsvpc
+      Cpu: !Ref FrontendTaskCPU
+      Memory: !Ref FrontendTaskMemory
+      ExecutionRoleArn: !GetAtt ECSTaskExecutionRole.Arn
+      ContainerDefinitions:
+        - Name: frontend
+          Image: !Ref FrontendImage
+          Essential: true
+          PortMappings:
+            - ContainerPort: 80
+              HostPort: 80
+              Protocol: tcp
+          Environment:
+            - Name: BACKEND_URL
+              Value: !Sub http://${BackendALB.DNSName}:3000
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref FrontendLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: frontend
+
+  # CloudWatch Log Groups
+  FrontendLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/ecs/${EnvironmentName}-frontend"
+      RetentionInDays: 30
+
+  BackendLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/ecs/${EnvironmentName}-backend"
+      RetentionInDays: 30
+
+  # ECS Services
+  BackendService:
+    Type: AWS::ECS::Service
+    DependsOn: BackendALBListener
+    Properties:
+      ServiceName: !Sub ${EnvironmentName}-backend
       Cluster: !Ref ECSCluster
-      TaskDefinition: !Ref ECSTaskDefinition
+      TaskDefinition: !Ref BackendTaskDefinition
+      DeploymentController:
+        Type: CODE_DEPLOY
+      LoadBalancers:
+        - TargetGroupArn: !Ref BackendTargetGroup
+          ContainerName: backend
+          ContainerPort: 3000
+      DesiredCount: !Ref BackendDesiredCount
       LaunchType: FARGATE
-      DesiredCount: 2  # Start with 2 instances (or adjust based on demand)
       NetworkConfiguration:
         AwsvpcConfiguration:
-          Subnets:
-            - Ref: PrivateSubnet1
-            - Ref: PrivateSubnet2
+          AssignPublicIp: DISABLED
           SecurityGroups:
-            - Ref: ECSFargateSG
-          AssignPublicIp: ENABLED
+            - !Ref BackendSecurityGroup
+          Subnets:
+            - !Ref PrivateSubnet1
+            - !Ref PrivateSubnet2
 
-  # IAM role for Application Auto Scaling
+  FrontendService:
+    Type: AWS::ECS::Service
+    DependsOn: PublicALBListener
+    Properties:
+      ServiceName: !Sub ${EnvironmentName}-frontend
+      Cluster: !Ref ECSCluster
+      TaskDefinition: !Ref FrontendTaskDefinition
+      DeploymentController:
+        Type: CODE_DEPLOY
+      LoadBalancers:
+        - TargetGroupArn: !Ref FrontendTargetGroup
+          ContainerName: frontend
+          ContainerPort: 80
+      DesiredCount: !Ref FrontendDesiredCount
+      LaunchType: FARGATE
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: ENABLED
+          SecurityGroups:
+            - !Ref FrontendSecurityGroup
+          Subnets:
+            - !Ref PublicSubnet1
+            - !Ref PublicSubnet2
+
+  # Auto Scaling for Services
+  FrontendAutoScalingTarget:
+    Type: AWS::ApplicationAutoScaling::ScalableTarget
+    Properties:
+      MaxCapacity: 10
+      MinCapacity: !Ref FrontendDesiredCount
+      ResourceId: !Join 
+        - '/'
+        - - service
+          - !Ref ECSCluster
+          - !GetAtt FrontendService.Name
+      ScalableDimension: ecs:service:DesiredCount
+      ServiceNamespace: ecs
+      RoleARN: !GetAtt AutoScalingRole.Arn
+
+  BackendAutoScalingTarget:
+    Type: AWS::ApplicationAutoScaling::ScalableTarget
+    Properties:
+      MaxCapacity: 10
+      MinCapacity: !Ref BackendDesiredCount
+      ResourceId: !Join 
+        - '/'
+        - - service
+          - !Ref ECSCluster
+          - !GetAtt BackendService.Name
+      ScalableDimension: ecs:service:DesiredCount
+      ServiceNamespace: ecs
+      RoleARN: !GetAtt AutoScalingRole.Arn
+
+  FrontendScaleOutPolicy:
+    Type: AWS::ApplicationAutoScaling::ScalingPolicy
+    Properties:
+      PolicyName: FrontendServiceScaleOutPolicy
+      PolicyType: StepScaling
+      ScalingTargetId: !Ref FrontendAutoScalingTarget
+      StepScalingPolicyConfiguration:
+        AdjustmentType: ChangeInCapacity
+        Cooldown: 60
+        MetricAggregationType: Average
+        StepAdjustments:
+          - MetricIntervalLowerBound: 0
+            ScalingAdjustment: 1
+
+  FrontendScaleInPolicy:
+    Type: AWS::ApplicationAutoScaling::ScalingPolicy
+    Properties:
+      PolicyName: FrontendServiceScaleInPolicy
+      PolicyType: StepScaling
+      ScalingTargetId: !Ref FrontendAutoScalingTarget
+      StepScalingPolicyConfiguration:
+        AdjustmentType: ChangeInCapacity
+        Cooldown: 60
+        MetricAggregationType: Average
+        StepAdjustments:
+          - MetricIntervalUpperBound: 0
+            ScalingAdjustment: -1
+
+  BackendScaleOutPolicy:
+    Type: AWS::ApplicationAutoScaling::ScalingPolicy
+    Properties:
+      PolicyName: BackendServiceScaleOutPolicy
+      PolicyType: StepScaling
+      ScalingTargetId: !Ref BackendAutoScalingTarget
+      StepScalingPolicyConfiguration:
+        AdjustmentType: ChangeInCapacity
+        Cooldown: 60
+        MetricAggregationType: Average
+        StepAdjustments:
+          - MetricIntervalLowerBound: 0
+            ScalingAdjustment: 1
+
+  BackendScaleInPolicy:
+    Type: AWS::ApplicationAutoScaling::ScalingPolicy
+    Properties:
+      PolicyName: BackendServiceScaleInPolicy
+      PolicyType: StepScaling
+      ScalingTargetId: !Ref BackendAutoScalingTarget
+      StepScalingPolicyConfiguration:
+        AdjustmentType: ChangeInCapacity
+        Cooldown: 60
+        MetricAggregationType: Average
+        StepAdjustments:
+          - MetricIntervalUpperBound: 0
+            ScalingAdjustment: -1
+
+  # CloudWatch Alarms for Auto Scaling
+  FrontendCPUAlarmHigh:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub ${EnvironmentName}-frontend-cpu-high
+      AlarmDescription: Scale up if CPU is high
+      MetricName: CPUUtilization
+      Namespace: AWS/ECS
+      Statistic: Average
+      Period: 60
+      EvaluationPeriods: 3
+      Threshold: 70
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: ClusterName
+          Value: !Ref ECSCluster
+        - Name: ServiceName
+          Value: !GetAtt FrontendService.Name
+      AlarmActions:
+        - !Ref FrontendScaleOutPolicy
+
+  FrontendCPUAlarmLow:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub ${EnvironmentName}-frontend-cpu-low
+      AlarmDescription: Scale down if CPU is low
+      MetricName: CPUUtilization
+      Namespace: AWS/ECS
+      Statistic: Average
+      Period: 60
+      EvaluationPeriods: 3
+      Threshold: 30
+      ComparisonOperator: LessThanThreshold
+      Dimensions:
+        - Name: ClusterName
+          Value: !Ref ECSCluster
+        - Name: ServiceName
+          Value: !GetAtt FrontendService.Name
+      AlarmActions:
+        - !Ref FrontendScaleInPolicy
+
+  BackendCPUAlarmHigh:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub ${EnvironmentName}-backend-cpu-high
+      AlarmDescription: Scale up if CPU is high
+      MetricName: CPUUtilization
+      Namespace: AWS/ECS
+      Statistic: Average
+      Period: 60
+      EvaluationPeriods: 3
+      Threshold: 70
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: ClusterName
+          Value: !Ref ECSCluster
+        - Name: ServiceName
+          Value: !GetAtt BackendService.Name
+      AlarmActions:
+        - !Ref BackendScaleOutPolicy
+
+  BackendCPUAlarmLow:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub ${EnvironmentName}-backend-cpu-low
+      AlarmDescription: Scale down if CPU is low
+      MetricName: CPUUtilization
+      Namespace: AWS/ECS
+      Statistic: Average
+      Period: 60
+      EvaluationPeriods: 3
+      Threshold: 30
+      ComparisonOperator: LessThanThreshold
+      Dimensions:
+        - Name: ClusterName
+          Value: !Ref ECSCluster
+        - Name: ServiceName
+          Value: !GetAtt BackendService.Name
+      AlarmActions:
+        - !Ref BackendScaleInPolicy
+
+  # AutoScaling Role
   AutoScalingRole:
     Type: AWS::IAM::Role
     Properties:
       AssumeRolePolicyDocument:
-        Version: "2012-10-17"
         Statement:
           - Effect: Allow
             Principal:
               Service: application-autoscaling.amazonaws.com
-            Action: "sts:AssumeRole"
+            Action: sts:AssumeRole
       ManagedPolicyArns:
-        - "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
+        - arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceAutoscaleRole
 
-  # Auto Scaling for ECS Service
-  ECSAutoScalingPolicy:
-    Type: AWS::ApplicationAutoScaling::ScalableTarget
-    Properties:
-      MaxCapacity: 4
-      MinCapacity: 1
-      ResourceId: !Join 
-        - "/"
-        - - "service"
-          - !Ref ECSCluster
-          - !GetAtt ECSFargateService.Name  # Get the actual service name
-      RoleARN: !GetAtt AutoScalingRole.Arn
-      ScalableDimension: ecs:service:DesiredCount
-      ServiceNamespace: ecs
-
-  # Task Definition for Fargate
-  ECSTaskDefinition:
-    Type: AWS::ECS::TaskDefinition
-    Properties:
-      Family: ECSFargateTaskDefinition
-      ExecutionRoleArn: !GetAtt ECSTaskExecutionRole.Arn
-      NetworkMode: awsvpc
-      RequiresCompatibilities:
-        - FARGATE
-      Cpu: "1024"  # 1 vCPU
-      Memory: "2048"  # 2 GB
-      ContainerDefinitions:
-        - Name: frontend
-          Image: "public.ecr.aws/u1k7f1w4/jdkframes-ui:first"
-          Memory: 512
-          PortMappings:
-            - ContainerPort: 80
-        - Name: backend
-          Image: "public.ecr.aws/u1k7f1w4/jdkframes-api:first"
-          Memory: 1024
-          PortMappings:
-            - ContainerPort: 3000
-          Environment:
-            - Name: "AwsAccessKeyID"
-              Value: !Ref AwsAccessKeyID
-            - Name: "AwsSecretAccessKey"
-              Value: !Ref AwsSecretAccessKey
-            - Name: "AwsRegion"
-              Value: !Ref AwsRegion
-            - Name: "AwsS3BucketName"
-              Value: !Ref AwsS3BucketName
-
-  # IAM Role for ECS Task
-  ECSTaskExecutionRole:
+  # CodeDeploy Resources for Blue/Green Deployment
+  CodeDeployServiceRole:
     Type: AWS::IAM::Role
     Properties:
       AssumeRolePolicyDocument:
-        Version: "2012-10-17"
         Statement:
-          - Effect: "Allow"
+          - Effect: Allow
             Principal:
-              Service: "ecs-tasks.amazonaws.com"
-            Action: "sts:AssumeRole"
+              Service: codedeploy.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AWSCodeDeployRoleForECS
+
+  # CodeDeploy Applications
+  FrontendCodeDeployApp:
+    Type: AWS::CodeDeploy::Application
+    Properties:
+      ApplicationName: !Sub ${EnvironmentName}-frontend-app
+      ComputePlatform: ECS
+
+  BackendCodeDeployApp:
+    Type: AWS::CodeDeploy::Application
+    Properties:
+      ApplicationName: !Sub ${EnvironmentName}-backend-app
+      ComputePlatform: ECS
+
+  # CodeDeploy Deployment Groups
+  FrontendDeploymentGroup:
+    Type: AWS::CodeDeploy::DeploymentGroup
+    Properties:
+      ApplicationName: !Ref FrontendCodeDeployApp
+      DeploymentGroupName: !Sub ${EnvironmentName}-frontend-dg
+      DeploymentConfigName: CodeDeployDefault.ECSAllAtOnce
+      ServiceRoleArn: !GetAtt CodeDeployServiceRole.Arn
+      DeploymentStyle:
+        DeploymentType: BLUE_GREEN
+        DeploymentOption: WITH_TRAFFIC_CONTROL
+      BlueGreenDeploymentConfiguration:
+        DeploymentReadyOption:
+          ActionOnTimeout: CONTINUE_DEPLOYMENT
+          WaitTimeInMinutes: 5
+        TerminateBlueInstancesOnDeploymentSuccess:
+          Action: TERMINATE
+          TerminationWaitTimeInMinutes: 5
+      ECSServices:
+        - ClusterName: !Ref ECSCluster
+          ServiceName: !GetAtt FrontendService.Name
+
+  BackendDeploymentGroup:
+    Type: AWS::CodeDeploy::DeploymentGroup
+    Properties:
+      ApplicationName: !Ref BackendCodeDeployApp
+      DeploymentGroupName: !Sub ${EnvironmentName}-backend-dg
+      DeploymentConfigName: CodeDeployDefault.ECSAllAtOnce
+      ServiceRoleArn: !GetAtt CodeDeployServiceRole.Arn
+      DeploymentStyle:
+        DeploymentType: BLUE_GREEN
+        DeploymentOption: WITH_TRAFFIC_CONTROL
+      BlueGreenDeploymentConfiguration:
+        DeploymentReadyOption:
+          ActionOnTimeout: CONTINUE_DEPLOYMENT
+          WaitTimeInMinutes: 5
+        TerminateBlueInstancesOnDeploymentSuccess:
+          Action: TERMINATE
+          TerminationWaitTimeInMinutes: 5
+      ECSServices:
+        - ClusterName: !Ref ECSCluster
+          ServiceName: !GetAtt BackendService.Name
+
+  # CodePipeline Resources
+  CodePipelineServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codepipeline.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AWSCodeBuildAdminAccess
       Policies:
-        - PolicyName: ECSFargateTaskExecutionPolicy
+        - PolicyName: CodePipelineServicePolicy
           PolicyDocument:
-            Version: "2012-10-17"
+            Version: '2012-10-17'
             Statement:
-              - Effect: "Allow"
+              - Effect: Allow
                 Action:
-                  - "ecr:GetAuthorizationToken"
-                  - "ecr:BatchCheckLayerAvailability"
-                  - "ecr:GetRepositoryPolicy"
-                  - "ecr:GetRepository"
-                  - "logs:CreateLogStream"
-                  - "logs:PutLogEvents"
-                Resource: "*"
+                  - ecs:*
+                  - ecr:*
+                  - codedeploy:*
+                  - s3:*
+                  - iam:PassRole
+                Resource: '*'
+
+  ArtifactBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      VersioningConfiguration:
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+
+  ArtifactBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref ArtifactBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: DenyUnEncryptedObjectUploads
+            Effect: Deny
+            Principal: '*'
+            Action: s3:PutObject
+            Resource: !Join ['', [!GetAtt ArtifactBucket.Arn, '/*']]
+            Condition:
+              StringNotEquals:
+                's3:x-amz-server-side-encryption': 'AES256'
+
+  # CodeBuild Resources
+  CodeBuildServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codebuild.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonECR-FullAccess
+        - arn:aws:iam::aws:policy/AmazonS3FullAccess
+
+  FrontendBuildProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub ${EnvironmentName}-frontend-build
+      Description: Build frontend Docker image
+      ServiceRole: !GetAtt CodeBuildServiceRole.Arn
+      Artifacts:
+        Type: CODEPIPELINE
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/amazonlinux2-x86_64-standard:3.0
+        PrivilegedMode: true
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: |
+          version: 0.2
+          phases:
+            pre_build:
+              commands:
+                - echo Logging in to Amazon ECR...
+                - aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com
+                - REPOSITORY_URI=$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/jdkframes-ui
+                - COMMIT_HASH=$(echo $CODEBUILD_RESOLVED_SOURCE_VERSION | cut -c 1-7)
+                - IMAGE_TAG=${COMMIT_HASH:=latest}
+            build:
+              commands:
+                - echo Build started on `date`
+                - echo Building the Docker image...
+                - docker pull public.ecr.aws/u1k7f1w4/jdkframes-ui:first
+                - docker tag public.ecr.aws/u1k7f1w4/jdkframes-ui:first $REPOSITORY_URI:$IMAGE_TAG
+            post_build:
+              commands:
+                - echo Build completed on `date`
+                - echo Pushing the Docker image...
+                - docker push $REPOSITORY_URI:$IMAGE_TAG
+                - echo Writing image definitions file...
+                - aws ecr describe-images --repository-name jdkframes-ui --image-ids imageTag=$IMAGE_TAG --query 'imageDetails[].imageTags[0]' --output text
+                - echo "{\"ImageURI\":\"$REPOSITORY_URI:$IMAGE_TAG\"}" > imageDefinition.json
+          artifacts:
+            files:
+              - imageDefinition.json
+              - appspec.yaml
+              - taskdef.json
+
+  BackendBuildProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub ${EnvironmentName}-backend-build
+      Description: Build backend Docker image
+      ServiceRole: !GetAtt CodeBuildServiceRole.Arn
+      Artifacts:
+        Type: CODEPIPELINE
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/amazonlinux2-x86_64-standard:3.0
+        PrivilegedMode: true
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: |
+          version: 0.2
+          phases:
+            pre_build:
+              commands:
+                - echo Logging in to Amazon ECR...
+                - aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com
+                - REPOSITORY_URI=$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/jdkframes-api
+                - COMMIT_HASH=$(echo $CODEBUILD_RESOLVED_SOURCE_VERSION | cut -c 1-7)
+                - IMAGE_TAG=${COMMIT_HASH:=latest}
+            build:
+              commands:
+                - echo Build started on `date`
+                - echo Building the Docker image...
+                - docker pull public.ecr.aws/u1k7f1w4/jdkframes-api:first
+                - docker tag public.ecr.aws/u1k7f1w4/jdkframes-api:first $REPOSITORY_URI:$IMAGE_TAG
+            post_build:
+              commands:
+                - echo Build completed on `date`
+                - echo Pushing the Docker image...
+                - docker push $REPOSITORY_URI:$IMAGE_TAG
+                - echo Writing image definitions file...
+                - aws ecr describe-images --repository-name jdkframes-api --image-ids imageTag=$IMAGE_TAG --query 'imageDetails[].imageTags[0]' --output text
+                - echo "{\"ImageURI\":\"$REPOSITORY_URI:$IMAGE_TAG\"}" > imageDefinition.json
+          artifacts:
+            files:
+              - imageDefinition.json
+              - appspec.yaml
+              - taskdef.json
+
+  # ECR Repositories
+  FrontendECRRepository:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: jdkframes-ui
+      LifecyclePolicy:
+        LifecyclePolicyText: |
+          {
+            "rules": [
+              {
+                "rulePriority": 1,
+                "description": "Keep only 10 images",
+                "selection": {
+                  "tagStatus": "any",
+                  "countType": "imageCountMoreThan",
+                  "countNumber": 10
+                },
+                "action": {
+                  "type": "expire"
+                }
+              }
+            ]
+          }
+
+  BackendECRRepository:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: jdkframes-api
+      LifecyclePolicy:
+        LifecyclePolicyText: |
+          {
+            "rules": [
+              {
+                "rulePriority": 1,
+                "description": "Keep only 10 images",
+                "selection": {
+                  "tagStatus": "any",
+                  "countType": "imageCountMoreThan",
+                  "countNumber": 10
+                },
+                "action": {
+                  "type": "expire"
+                }
+              }
+            ]
+          }
+
+  # CodePipeline
+  AppPipeline:
+    Type: AWS::CodePipeline::Pipeline
+    Properties:
+      RoleArn: !GetAtt CodePipelineServiceRole.Arn
+      ArtifactStore:
+        Type: S3
+        Location: !Ref ArtifactBucket
+      Stages:
+        - Name: Source
+          Actions:
+            - Name: Source
+              ActionTypeId:
+                Category: Source
+                Owner: ThirdParty
+                Provider: GitHub
+                Version: '1'
+              Configuration:
+                Owner: !Ref GitHubOwner
+                Repo: !Ref GitHubRepo
+                Branch: !Ref GitHubBranch
+                OAuthToken: !Ref GitHubToken
+              OutputArtifacts:
+                - Name: SourceCode
+              RunOrder: 1
+        - Name: Build
+          Actions:
+            - Name: BuildFrontend
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Provider: CodeBuild
+                Version: '1'
+              Configuration:
+                ProjectName: !Ref FrontendBuildProject
+              InputArtifacts:
+                - Name: SourceCode
+              OutputArtifacts:
+                - Name: FrontendBuildOutput
+              RunOrder: 1
+            - Name: BuildBackend
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Provider: CodeBuild
+                Version: '1'
+              Configuration:
+                ProjectName: !Ref BackendBuildProject
+              InputArtifacts:
+                - Name: SourceCode
+              OutputArtifacts:
+                - Name: BackendBuildOutput
+              RunOrder: 1
+        - Name: Deploy
+          Actions:
+            - Name: DeployFrontend
+              ActionTypeId:
+                Category: Deploy
+                Owner: AWS
+                Provider: CodeDeployToECS
+                Version: '1'
+              Configuration:
+                ApplicationName: !Ref FrontendCodeDeployApp
+                DeploymentGroupName: !Ref FrontendDeploymentGroup
+                TaskDefinitionTemplateArtifact: FrontendBuildOutput
+                AppSpecTemplateArtifact: FrontendBuildOutput
+                Image1ArtifactName: FrontendBuildOutput
+                Image1ContainerName: IMAGE1_NAME
+              InputArtifacts:
+                - Name: FrontendBuildOutput
+              RunOrder: 1
+            - Name: DeployBackend
+              ActionTypeId:
+                Category: Deploy
+                Owner: AWS
+                Provider: CodeDeployToECS
+                Version: '1'
+              Configuration:
+                ApplicationName: !Ref BackendCodeDeployApp
+                DeploymentGroupName: !Ref BackendDeploymentGroup
+                TaskDefinitionTemplateArtifact: BackendBuildOutput
+                AppSpecTemplateArtifact: BackendBuildOutput
+                Image1ArtifactName: BackendBuildOutput
+                Image1ContainerName: IMAGE1_NAME
+              InputArtifacts:
+                - Name: BackendBuildOutput
+              RunOrder: 1
 
 Outputs:
-  VPCId:
-    Description: VPC ID
+  VpcId:
+    Description: The ID of the VPC that this stack is deployed in
     Value: !Ref VPC
+    Export:
+      Name: !Sub ${EnvironmentName}-VPCID
 
-  # PublicSubnetIds:
-  #   Description: Public Subnet IDs
-  #   Value:
-  #     - Ref: PublicSubnet1
-  #     - Ref: PublicSubnet2
+  PublicSubnets:
+    Description: A list of the public subnets
+    Value: !Join [ ",", [ !Ref PublicSubnet1, !Ref PublicSubnet2 ]]
+    Export:
+      Name: !Sub ${EnvironmentName}-PUBLIC-SUBNETS
 
-  # PrivateSubnetIds:
-  #   Description: Private Subnet IDs
-  #   Value:
-  #     - Ref: PrivateSubnet1
-  #     - Ref: PrivateSubnet2
+  PrivateSubnets:
+    Description: A list of the private subnets
+    Value: !Join [ ",", [ !Ref PrivateSubnet1, !Ref PrivateSubnet2 ]]
+    Export:
+      Name: !Sub ${EnvironmentName}-PRIVATE-SUBNETS
 
-  ALBURL:
-    Description: URL of the ALB
-    Value: !Sub "http://${ALB.DNSName}"
+  ECSCluster:
+    Description: The ARN of the ECS cluster
+    Value: !Ref ECSCluster
+    Export:
+      Name: !Sub ${EnvironmentName}-ECS-CLUSTER
+
+  FrontendServiceName:
+    Description: The name of the frontend service
+    Value: !GetAtt FrontendService.Name
+    Export:
+      Name: !Sub ${EnvironmentName}-FRONTEND-SERVICE
+
+  BackendServiceName:
+    Description: The name of the backend service
+    Value: !GetAtt BackendService.Name
+    Export:
+      Name: !Sub ${EnvironmentName}-BACKEND-SERVICE
+
+  FrontendURL:
+    Description: URL of the frontend application
+    Value: !Sub http://${PublicALB.DNSName}
+    Export:
+      Name: !Sub ${EnvironmentName}-FRONTEND-URL
+
+  BackendURL:
+    Description: URL of the backend API (internal)
+    Value: !Sub http://${BackendALB.DNSName}:3000
+    Export:
+      Name: !Sub ${EnvironmentName}-BACKEND-URL
+
+  ImagesBucketName:
+    Description: Name of S3 bucket storing images
+    Value: !Ref ImagesBucket
+    Export:
+      Name: !Sub ${EnvironmentName}-IMAGES-BUCKET
