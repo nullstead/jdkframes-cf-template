@@ -257,14 +257,32 @@ Resources:
             - Ref: ECSFargateSG
           AssignPublicIp: ENABLED
 
+  # IAM role for Application Auto Scaling
+  AutoScalingRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: application-autoscaling.amazonaws.com
+            Action: "sts:AssumeRole"
+      ManagedPolicyArns:
+        - "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
+
   # Auto Scaling for ECS Service
   ECSAutoScalingPolicy:
     Type: AWS::ApplicationAutoScaling::ScalableTarget
     Properties:
       MaxCapacity: 4
       MinCapacity: 1
-      ResourceId: !Sub "service/${ECSCluster}/${ECSFargateService}"
-      RoleARN: arn:aws:iam::aws:policy/service-role/AmazonECSServiceRolePolicy
+      ResourceId: !Join 
+        - "/"
+        - - "service"
+          - !Ref ECSCluster
+          - !GetAtt ECSFargateService.Name  # Get the actual service name
+      RoleARN: !GetAtt AutoScalingRole.Arn
       ScalableDimension: ecs:service:DesiredCount
       ServiceNamespace: ecs
 
@@ -274,6 +292,11 @@ Resources:
     Properties:
       Family: ECSFargateTaskDefinition
       ExecutionRoleArn: !GetAtt ECSTaskExecutionRole.Arn
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      Cpu: "1024"  # 1 vCPU
+      Memory: "2048"  # 2 GB
       ContainerDefinitions:
         - Name: frontend
           Image: "public.ecr.aws/u1k7f1w4/jdkframes-ui:first"
